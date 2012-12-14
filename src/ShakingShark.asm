@@ -1,23 +1,15 @@
 ;=============================================================
-; title			: eMushibue
+; title			: ShakingShark
 ; author		: Nobuhiro Kuroiwa
-; started on	: 11/11/2012
+; started on	: 12/12/2012
 ; clock			: clk=8MHz
 ;=============================================================
 ; debug directive
-;#define	DEBUG
+#define	DEBUG
 
 ; chip select
-;#define			ATMEGA168	; Atmega168
-#define			ATTINY45	; AtTiny45
-
-; melody data select
-; uncomment one of followings or ALL
-;#define		XMAS		; We wish you a merry christmas
-;#define		DONSUKA		; Donsuka pan pan ouendan
-;#define		SPERUNKER	; Sperunker
-;#define		JAWS		; Jaws theme
-#define			ALL			; play all
+#define			ATMEGA168	; Atmega168
+;#define			ATTINY45	; AtTiny45
 
 .include "musicnote.inc"	; definition of music stuff
 
@@ -42,8 +34,6 @@
 .equ PIN_ACCY	= 1		; pin for above
 .equ TIMERMASK	= TIMSK0
 .equ ADCSRAVAL	= (1<<ADEN)|(1<<ADSC)|(1<<ADIF)|(1<<ADIE)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0)
-						; adc setting
-						; max adc takes 400us, etc
 .equ ADMUXVAL	= (1<<REFS0)|(1<<ADLAR)	; adc ref voltage=AVcc, 8bit precision
 #endif
 
@@ -66,8 +56,6 @@
 .equ PIN_ACCY	= 4		; pin for above
 .equ TIMERMASK	= TIMSK
 .equ ADCSRAVAL	= (1<<ADEN)|(1<<ADSC)|(1<<ADIF)|(1<<ADIE)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0)
-						; adc setting
-						; max adc takes 400us, etc
 .equ ADMUXVAL	= (1<<ADLAR)|(1<<MUX0)	; adc ref vref=internal, 8bit precision
 #endif
 
@@ -84,6 +72,19 @@
 .equ VCNTMAX	= 20	; max valu of vcnt
 .equ ZEROGREADX	= 128	; 0g value of accerelometer read along x-axis
 .equ ZEROGREADY	= 128	; same for y-axis
+.equ INPUT_LV0	= 0		; input level 0
+.equ INPUT_LV1	= 1		; input level 1
+.equ INPUT_LV2	= 2		; input level 2
+.equ INPUT_LV3	= 3		; input level 3
+.equ INPUT_LV4	= 4		; input level 4
+.equ SNDDATA_ID_LV0		= 0
+.equ SNDDATA_ID_LV1		= 1
+.equ SNDDATA_ID_LV2		= 2
+.equ SNDDATA_ID_LV3		= 3
+.equ SNDDATA_ID_LV4_1	= 4
+.equ SNDDATA_ID_LV4_2	= 5
+.equ SNDDATA_ID_LV4_3	= 6
+.equ SNDDATA_ID_LV4_4	= 7
 
 ;=============================================================
 ; variables
@@ -101,12 +102,16 @@
 .def mcnt		= r10	; t100ms counter
 .def mtop		= r11	; tcnt top value
 .def scnt		= r12	; compare to scnt for rythm
-.def vcnttop	= r13	; volume count top
-.def vcnt		= r14	; volume count
 .def vval		= r16	; last applied voltage displacement
 .def vread		= r17	; voltage displacement read in process
-.def acc		= r18	; accumulator
-.def acc2		= r19	; accumulator2
+.def curdata_id	= r18
+.def nxtdata_id	= r19
+.def curdata_sth= r20	; current phrase data start high address
+.def curdata_stl= r21	; current phrase data start low address
+.def curdata_edh= r22	; current phrase data end high address
+.def curdata_edl= r23	; current phrase data end low address
+.def acc		= r24	; accumulator
+.def acc2		= r25	; accumulator2
 
 ;=============================================================
 ; macro
@@ -162,6 +167,14 @@
 	.else 
 		.error "OutReg: Invalid I/O register address" 
 	.endif 
+.endmacro 
+
+; usage: SetData addr_start, addr_end 
+.macro SetData 
+	ldi		curdata_stl, low(@0<<1)
+	ldi		curdata_sth, high(@0<<1)
+	ldi		curdata_edl, low(@1<<1)
+	ldi		curdata_edh, high(@1<<1)
 .endmacro 
 
 ;=============================================================
@@ -241,16 +254,15 @@ main:
 	clr		mcnt			; initialize melody counter
 
 	; load data
-	ldi		zl, low(SNDDATA<<1)		; init zl
-	ldi		zh, high(SNDDATA<<1)	; init zh
+	clr		zl				; init zl
+	clr		zh				; init zh
+
+	clr		curdata_id
+	clr		nxtdata_id
+	SetData	0, 0
 
 	lpm		mtop, z+		; initialize tcnt compare value
 	lpm		sctop, z+		; count untill scnt becomes this value
-
-	; initialize volume counter
-	ldi		acc, 0
-	mov		vcnttop, acc
-	clr		vcnt
 
 	; initialize adc
 	clr		vread
@@ -284,7 +296,6 @@ intr_time0:
 
 	TimeCount	t10us,	intr_time0_sndpwm	; count wrap around for 10us
 	TimeCount	t100us,	intr_time0_sndpwm	; count wrap around for 100us
-	rcall		vol_ctrl					; call every 100us
 	TimeCount	t1ms,	intr_time0_sndpwm	; count wrap around for 1ms
 	TimeCount	t10ms,	intr_time0_sndpwm	; count wrap around for 10ms
 	TimeCount	t100ms,	initr_time0_setsnd	; count wrap around for 100ms
@@ -311,28 +322,6 @@ intr_time0_end:
 	reti
 
 ;=============================================================
-; volume control
-;=============================================================
-vol_ctrl:
-	inc		vcnt
-	cp		vcnt, vcnttop
-	brlt	vol_ctrl_on	; if vcnt < vcnttop, goto vol_ctrl_high
-	rjmp	vol_ctrl_off
-vol_ctrl_on:
-	sbi		PRT_VOL, PIN_VOL
-	rjmp	vol_ctrl_vcnt
-vol_ctrl_off:
-	cbi		PRT_VOL, PIN_VOL
-	rjmp	vol_ctrl_vcnt
-vol_ctrl_vcnt:
-	ldi		acc, VCNTMAX
-	cp		vcnt, acc
-	brne vol_ctrl_ext
-	clr		vcnt
-vol_ctrl_ext:
-	ret
-
-;=============================================================
 ; set sound frequency
 ;=============================================================
 set_snd:
@@ -342,14 +331,13 @@ set_snd:
 	clr		mcnt
 
 	; check more data left
-	cpi		zl, low(SNDDATA_END<<1)
+	cp		zl, curdata_edl
 	brne	set_snd_asgn
-	cpi		zh, high(SNDDATA_END<<1)
+	cp		zh, curdata_edh
 	brne	set_snd_asgn
 
-	; if data is end, reset pointer with head position
-	ldi		zl, low(SNDDATA<<1)
-	ldi		zh, high(SNDDATA<<1)
+	mov		acc, nxtdata_id
+	rcall	load_snd_for_id
 
 set_snd_asgn:
 	lpm		mtop, z+		; initialize tcnt compare value
@@ -378,7 +366,7 @@ snd_pwm_ext:
 	ret
 
 ;=============================================================
-; adc_complete
+; adc_complete interruption
 ;=============================================================
 adc_comp:
 	StoreRegs
@@ -421,37 +409,31 @@ readv_compare:
 	cpi		vval, 32-SENSITIVITY
 	brlt	readv_level3
 	cpi		vval, 34-SENSITIVITY
-	brlt	readv_level4
-	rjmp	readv_level5
+	rjmp	readv_level4
 readv_level0:
-	ldi		acc, 0
+	ldi		acc, INPUT_LV0
 	ldi		acc2, 0b0000_0001
 	rjmp readv_ext
 readv_level1:
-	ldi		acc, 5
+	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0000_0011
 	rjmp readv_ext
 readv_level2:
-	ldi		acc, 6
+	ldi		acc, INPUT_LV2
 	ldi		acc2, 0b0000_0111
 	rjmp readv_ext
 readv_level3:
-	ldi		acc, 7
+	ldi		acc, INPUT_LV3
 	ldi		acc2, 0b0000_1111
 	rjmp readv_ext
 readv_level4:
-	ldi		acc, 8
+	ldi		acc, INPUT_LV4
 	ldi		acc2, 0b0001_1111
 	rjmp readv_ext
-readv_level5:
-	ldi		acc, 20
-	ldi		acc2, 0b0011_1111
-	rjmp readv_ext
 readv_ext:
-	mov		vcnttop, acc
-	clr		vcnt
+	rcall	select_snd
 #ifdef ATMEGA168
-	out		;PRT_LV, acc2
+	out		PRT_LV, acc2
 #endif
 #ifdef ATTINY45
 	sbi		PRT_LV, PIN_LV
@@ -459,529 +441,98 @@ readv_ext:
 	ret
 
 ;=============================================================
+; set input level
+;=============================================================
+select_snd:
+	cpi		acc, INPUT_LV0
+	breq	select_snd_lv0
+	cpi		acc, INPUT_LV1
+	breq	select_snd_lv1
+	cpi		acc, INPUT_LV2
+	breq	select_snd_lv2
+	cpi		acc, INPUT_LV3
+	breq	select_snd_lv3
+	cpi		acc, INPUT_LV4
+	breq	select_snd_lv4
+select_snd_lv0:
+	ldi		acc, SNDDATA_ID_LV0
+	rjmp	select_snd_ext
+select_snd_lv1:
+	ldi		acc, SNDDATA_ID_LV1
+	rjmp	select_snd_ext
+select_snd_lv2:
+	ldi		acc, SNDDATA_ID_LV2
+	rjmp	select_snd_ext
+select_snd_lv3:
+	ldi		acc, SNDDATA_ID_LV3
+	rjmp	select_snd_ext
+select_snd_lv4:
+	ldi		acc, SNDDATA_ID_LV4_1
+	rjmp	select_snd_ext
+select_snd_ext:
+	mov nxtdata_id, acc
+	ret
+
+load_snd_for_id:
+	cpi		acc, 0
+	breq	load_snd_for_id_lv0
+	cpi		acc, SNDDATA_ID_LV0
+	breq	load_snd_for_id_lv1
+	cpi		acc, SNDDATA_ID_LV1
+	breq	load_snd_for_id_lv2
+	cpi		acc, SNDDATA_ID_LV2
+	breq	load_snd_for_id_lv3
+	cpi		acc, SNDDATA_ID_LV3
+	breq	load_snd_for_id_lv4_1
+	cpi		acc, SNDDATA_ID_LV4_1
+	breq	load_snd_for_id_lv4_2
+	cpi		acc, SNDDATA_ID_LV4_2
+	breq	load_snd_for_id_lv4_3
+	cpi		acc, SNDDATA_ID_LV4_3
+	breq	load_snd_for_id_lv4_4
+	cpi		acc, SNDDATA_ID_LV4_4
+load_snd_for_id_lv0:
+	SetData	0, 0
+	rjmp	select_snd_ext
+load_snd_for_id_lv1:
+	SetData	SND_LV1, SND_LV1_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv2:
+	SetData	SND_LV2, SND_LV2_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv3:
+	SetData	SND_LV3, SND_LV3_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv4_1:
+	SetData	SND_LV4_1, SND_LV4_1_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv4_2:
+	SetData	SND_LV4_2, SND_LV4_2_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv4_3:
+	SetData	SND_LV4_3, SND_LV4_3_END
+	rjmp	select_snd_ext
+load_snd_for_id_lv4_4:
+	SetData	SND_LV4_4, SND_LV4_4_END
+	rjmp	select_snd_ext
+load_snd_for_id_ext:
+	mov		nxtdata_id, acc
+	ret
+
+;=============================================================
 ; data
 ;=============================================================
-#if defined(XMAS) || defined(ALL)
-SNDDATA:
-	.db NOTE_8, TONE_2G
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2B
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
 
-	.db NOTE_8, TONE_2A
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_1D
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2C
-	.db NOTE_8, TONE_1B
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_0G
-
-	.db NOTE_8, TONE_1G
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_8, TONE_1A
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_1B
-	.db NOTE_4, TONE_2C
-
-	.db NOTE_8, TONE_2G
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2B
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
-
-	.db NOTE_8, TONE_2A
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_1D
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2C
-	.db NOTE_8, TONE_1B
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_0G
-
-	.db NOTE_8, TONE_1G
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_8, TONE_1A
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_1B
-	.db NOTE_4, TONE_2C
-
-	.db NOTE_8, TONE_1G
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1C
-	.db NOTE_4, TONE_1B
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_2E
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_4, TONE_1B
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_2E
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_8, TONE_2G
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_0G
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_0G
-	.db NOTE_8, TONE_1A
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_1B
-	.db NOTE_4, TONE_2C
-
-	.db NOTE_8, TONE_2G
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2B
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_1A
-
-	.db NOTE_8, TONE_2A
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_1D
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2C
-	.db NOTE_8, TONE_1B
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_0G
-
-	.db NOTE_8, TONE_1G
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_8, TONE_1A
-	.db NOTE_8, TONE_2D
-	.db NOTE_8, TONE_1B
-	.db NOTE_4, TONE_2C
-#if !defined(ALL)
-SNDDATA_END:
-#endif
-#endif
-
-#if defined(DONSUKA) || defined(ALL)
-#if !defined(ALL)
-SNDDATA:
-#endif
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_2G
-	.db NOTE_16, TONE_2A
-	.db NOTE_32, TONE_2G
-	.db NOTE_32, TONE_2A
-	.db NOTE_16, TONE_2AS
-	.db NOTE_16, TONE_2A
-	.db NOTE_16, TONE_2G
-	.db NOTE_16, TONE_2F
-	.db NOTE_12, TONE_2DS
-	.db NOTE_32, TONE_2F
-	.db NOTE_32, TONE_2G
-	.db NOTE_16, TONE_2GS
-	.db NOTE_16, TONE_2G
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_2DS
-
-	.db NOTE_4, TONE_1C
-	.db NOTE_4, TONE_1E
-	.db NOTE_4, TONE_1G
-	.db NOTE_8, TONE_2C
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_2G
-	.db NOTE_16, TONE_3C
-	.db NOTE_16, TONE_2G
-	.db NOTE_16, TONE_2F
-	.db NOTE_8, TONE_2E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2E
-	.db NOTE_16, TONE_1E
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_2F
-	.db NOTE_16, TONE_1F
-	.db NOTE_8, TONE_1G
-	.db NOTE_8, TONE_2C
-	.db NOTE_4, TONE_1AS
-
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_0AS
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1C
-	.db NOTE_8, TONE_2DS
-	.db NOTE_8, TONE_2D
-	.db NOTE_4, TONE_2C
-
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_0A
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_0AS
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1C
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_NONE
-
-	
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_0G
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-	.db NOTE_2, TONE_NONE
-#if !defined(ALL)
-SNDDATA_END:
-#endif
-#endif
-
-#if defined(SPERUNKER) || defined(ALL)
-#if !defined(ALL)
-SNDDATA:
-#endif
-	.db NOTE_16, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1E
-	.db NOTE_8, TONE_1C
-
-	.db NOTE_16, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1E
-	.db NOTE_8, TONE_1C
-
-	.db NOTE_16, TONE_NONE
-	.db NOTE_8, TONE_2C
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2DS
-	.db NOTE_16, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_32, TONE_2DS
-	.db NOTE_32, TONE_2D
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_2DS
-	.db NOTE_16, TONE_2D
-	.db NOTE_4, TONE_2C
-
-	.db NOTE_16, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1E
-	.db NOTE_8, TONE_1C
-
-	.db NOTE_4, TONE_1GS
-	.db NOTE_8, TONE_1GS
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_2AS
-	.db NOTE_16, TONE_2D
-	.db NOTE_8, TONE_2C
-	.db NOTE_8, TONE_1AS
-	.db NOTE_12, TONE_1AS
-
-	.db NOTE_4, TONE_2C
-	.db NOTE_16, TONE_2DS
-	.db NOTE_16, TONE_2D
-	.db NOTE_16, TONE_2C
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_0G
-	.db NOTE_16, TONE_NONE
-
-	.db NOTE_16, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1E
-	.db NOTE_8, TONE_1C
-
-	.db NOTE_16, TONE_2C
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_2C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1AS
-	.db NOTE_16, TONE_1A
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_1F
-	.db NOTE_16, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1E
-	.db NOTE_8, TONE_1C
-
-	.db NOTE_32, TONE_1AS
-	.db NOTE_16, TONE_NONE
-	.db NOTE_32, TONE_1G
-	.db NOTE_32, TONE_1A
-	.db NOTE_16, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_1G
-	.db NOTE_16, TONE_NONE
-	.db NOTE_32, TONE_1DS
-	.db NOTE_32, TONE_1F
-	.db NOTE_16, TONE_NONE
-	.db NOTE_32, TONE_1D
-	.db NOTE_32, TONE_1C
-	.db NOTE_24, TONE_NONE
-	.db NOTE_16, TONE_1DS
-	.db NOTE_16, TONE_NONE
-	.db NOTE_16, TONE_1C
-	.db NOTE_16, TONE_NONE
-	.db NOTE_8, TONE_NONE
-#if !defined(ALL)
-SNDDATA_END:
-#endif
-#endif
-
-#if defined(JAWS) || defined(ALL)
-#if !defined(ALL)
-SNDDATA:
-#endif
+SND_LV1:
 	.db NOTE_8, TONE_1E		;ta-da
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
 	.db NOTE_8, TONE_NONE
 	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
+SND_LV1_END:
 
-	.db NOTE_8, TONE_1E		;ta-da
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_16, TONE_NONE
-	.db NOTE_2, TONE_NONE
-
+SND_LV2:
 	.db NOTE_8, TONE_1E		;ta-da,ta-da
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
@@ -990,49 +541,28 @@ SNDDATA:
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
+SND_LV2_END:
 
+SND_LV3:
 	.db NOTE_32, TONE_1E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
+SND_LV3_END:
 
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-
+SND_LV4_1:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_2G
 	.db NOTE_WL, TONE_2AS
+SND_LV4_1_END:
 
+SND_LV4_2:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_2G
 	.db NOTE_WL, TONE_3C
+SND_LV4_2_END:
 
+SND_LV4_3:
 	.db NOTE_8, TONE_3E
 	.db NOTE_8, TONE_2B
 	.db NOTE_8, TONE_3FS
@@ -1053,7 +583,9 @@ SNDDATA:
 	.db NOTE_8, TONE_3CS
 	.db NOTE_4, TONE_2B
 	.db NOTE_8, TONE_2B
+SND_LV4_3_END:
 
+SND_LV4_4:
 	.db NOTE_32, TONE_1E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
@@ -1070,7 +602,9 @@ SNDDATA:
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
-	
+SND_LV4_4_END:
+
+SND_LV4_5:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_2F
@@ -1089,11 +623,7 @@ SNDDATA:
 	.db NOTE_32, TONE_NONE
 
 	.db NOTE_4, TONE_NONE
-
-#if defined(JAWS) || defined(ALL)
-SNDDATA_END:
-#endif
-#endif
+SND_LV4_5_END:
 
 ;=============================================================
 ;=============================================================
