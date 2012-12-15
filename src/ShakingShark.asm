@@ -349,6 +349,13 @@ set_freq_exit:
 ; sound frequency pwm
 ;=============================================================
 snd_pwm:
+	cpi		curdata_id, SNDDATA_ID_LV0
+	breq	snd_pwm_mute
+	rjmp	snd_pwm_out
+snd_pwm_mute:
+	cbi		PRT_SND, 1<<PIN_SND
+	ret
+snd_pwm_out:
 	cp		scnt, sctop
 	inc		scnt
 	brlt	snd_pwm_ext
