@@ -175,6 +175,8 @@
 	ldi		curdata_sth, high(@0<<1)
 	ldi		curdata_edl, low(@1<<1)
 	ldi		curdata_edh, high(@1<<1)
+	lpm		mtop, z+		; initialize tcnt compare value
+	lpm		sctop, z+		; count untill scnt becomes this value
 .endmacro 
 
 ;=============================================================
@@ -261,9 +263,6 @@ main:
 	clr		nxtdata_id
 	SetData	0, 0
 
-	lpm		mtop, z+		; initialize tcnt compare value
-	lpm		sctop, z+		; count untill scnt becomes this value
-
 	; initialize adc
 	clr		vread
 	ldi		acc, ADMUXVAL
@@ -302,8 +301,8 @@ intr_time0:
 	TimeCount	t1s,	initr_time0_setsnd	; count wrap around for 1s
 
 initr_time0_setsnd:
-	; set sound frequency
-	rcall	set_snd							; called every 100ms
+	; generate sound
+	rcall	set_freq						; called every 100ms
 
 	; request adc interruption
 	InReg	acc, ADMUX
@@ -324,45 +323,39 @@ intr_time0_end:
 ;=============================================================
 ; set sound frequency
 ;=============================================================
-set_snd:
+set_freq:
+	cp		mcnt, mtop
 	inc		mcnt
-	cp		mtop, mcnt
-	brne	set_snd_exit	; if mtop!=mcnt, do nothing
+	brlt	set_freq_exit	; if mcnt<mtop, do nothing
 	clr		mcnt
 
 	; check more data left
 	cp		zl, curdata_edl
-	brne	set_snd_asgn
+	brne	set_freq_asgn
 	cp		zh, curdata_edh
-	brne	set_snd_asgn
+	brne	set_freq_asgn
 
 	mov		acc, nxtdata_id
 	rcall	load_snd_for_id
 
-set_snd_asgn:
+set_freq_asgn:
 	lpm		mtop, z+		; initialize tcnt compare value
 	lpm		sctop, z+		; count untill scnt becomes this value
 	clr		scnt
-set_snd_exit:
+set_freq_exit:
 	ret
 
 ;=============================================================
 ; sound frequency pwm
 ;=============================================================
 snd_pwm:
-	clc
-	adc		scnt, one
-	brcc	snd_pwm1
-	clc
-	adc		scnt, one
-	brcc	snd_pwm1
-	clc
-snd_pwm1:
-	cp		sctop, scnt
-	brne	snd_pwm_ext
+	cp		scnt, sctop
+	inc		scnt
+	brlt	snd_pwm_ext
 	FlipOut	PRT_SND, 1<<PIN_SND
 	clr		scnt
 snd_pwm_ext:
+	inc		mcnt
 	ret
 
 ;=============================================================
