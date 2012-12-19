@@ -20,9 +20,6 @@
 .include "m168def.inc"	;
 .equ PRT_LV		= portb	; port for level indicator
 .equ DDR_LV		= ddrb	; ddr  for PRT_LV
-.equ PRT_VOL	= portd	; port for volume pwm
-.equ DDR_VOL	= ddrd	; ddr for PRT_VOL
-.equ PIN_VOL	= 1		; pin for above
 .equ PRT_SND	= portd	; port for sound pwm
 .equ DDR_SND	= ddrd	; ddr for PRT_SND
 .equ PIN_SND	= 0		; pin for above
@@ -42,9 +39,6 @@
 .equ PRT_LV		= portb	; port for level indicator
 .equ DDR_LV		= ddrb	; ddr  for PRT_LV
 .equ PIN_LV		= 3
-.equ PRT_VOL	= portb	; port for volume pwm
-.equ DDR_VOL	= ddrb	; ddr for PRT_VOL
-.equ PIN_VOL	= 1		; pin for above
 .equ PRT_SND	= portb	; port for sound pwm
 .equ DDR_SND	= ddrb	; ddr for PRT_SND
 .equ PIN_SND	= 0		; pin for above
@@ -104,12 +98,12 @@
 .def scnt		= r12	; compare to scnt for rythm
 .def vval		= r16	; last applied voltage displacement
 .def vread		= r17	; voltage displacement read in process
-.def curdata_id	= r18
-.def nxtdata_id	= r19
-.def curdata_sth= r20	; current phrase data start high address
-.def curdata_stl= r21	; current phrase data start low address
-.def curdata_edh= r22	; current phrase data end high address
-.def curdata_edl= r23	; current phrase data end low address
+.def cur_data_id	= r18
+.def nxt_data_id	= r19
+;.def cur_data_sth	= r20	; current phrase data start high address
+;.def cur_data_stl	= r21	; current phrase data start low address
+.def cur_data_edh	= r22	; current phrase data end high address
+.def cur_data_edl	= r23	; current phrase data end low address
 .def acc		= r24	; accumulator
 .def acc2		= r25	; accumulator2
 
@@ -171,10 +165,10 @@
 
 ; usage: SetData addr_start, addr_end 
 .macro SetData 
-	ldi		curdata_stl, low(@0<<1)
-	ldi		curdata_sth, high(@0<<1)
-	ldi		curdata_edl, low(@1<<1)
-	ldi		curdata_edh, high(@1<<1)
+	ldi		zl, low(@0<<1)
+	ldi		zh, high(@0<<1)
+	ldi		cur_data_edl, low(@1<<1)
+	ldi		cur_data_edh, high(@1<<1)
 	lpm		mtop, z+		; initialize tcnt compare value
 	lpm		sctop, z+		; count untill scnt becomes this value
 .endmacro 
@@ -224,22 +218,11 @@ main:
 	out	 	PRT_LV, acc		; set all to low
 #endif
 #ifdef ATTINY45
-	sbi		DDR_SND, PIN_SND
-	sbi		DDR_VOL, PIN_VOL
 	sbi		DDR_LV, PIN_LV
+#endif
+	sbi		DDR_SND, PIN_SND
 	cbi		DDR_ACCX, PIN_ACCX
 	cbi		DDR_ACCY, PIN_ACCY
-#endif
-
-	; Timer/Counter 0 initialize
-	; tccr0a=0, standard mode
-	ldi		acc, 0
-	sbr	 	acc,(1<<TOIE0)	; set overflow interruption bit
-	OutReg	TIMERMASK, acc	; allow timer0 overflow interruption
-	ldi	 	acc, T10USEC	; 10us count
-	out	 	TCNT0, acc		; set timer0 counter
-	ldi	 	acc, PRE_SCALE	; set prescale
-	out	 	TCCR0B, acc		; start timer0
 
 	; initialize our counters
 	clr	 	t10us			; init counter for 10us
@@ -251,17 +234,33 @@ main:
 
 	; initialize sound interval counter
 	clr		sctop			; sound interval count
+	clr		scnt
 
 	; initialize melody counter
+	clr		mtop
 	clr		mcnt			; initialize melody counter
 
 	; load data
 	clr		zl				; init zl
 	clr		zh				; init zh
 
-	clr		curdata_id
-	clr		nxtdata_id
-	SetData	0, 0
+	clr		cur_data_id
+	clr		nxt_data_id
+	clr		cur_data_edl
+	clr		cur_data_edh
+
+	ldi		cur_data_id, SNDDATA_ID_LV0
+	ldi		nxt_data_id, SNDDATA_ID_LV0
+
+	; Timer/Counter 0 initialize
+	; tccr0a=0, standard mode
+	ldi		acc, 0
+	sbr	 	acc,(1<<TOIE0)	; set overflow interruption bit
+	OutReg	TIMERMASK, acc	; allow timer0 overflow interruption
+	ldi	 	acc, T10USEC	; 10us count
+	out	 	TCNT0, acc		; set timer0 counter
+	ldi	 	acc, PRE_SCALE	; set prescale
+	out	 	TCCR0B, acc		; start timer0
 
 	; initialize adc
 	clr		vread
@@ -297,10 +296,10 @@ intr_time0:
 	TimeCount	t100us,	intr_time0_sndpwm	; count wrap around for 100us
 	TimeCount	t1ms,	intr_time0_sndpwm	; count wrap around for 1ms
 	TimeCount	t10ms,	intr_time0_sndpwm	; count wrap around for 10ms
-	TimeCount	t100ms,	initr_time0_setsnd	; count wrap around for 100ms
-	TimeCount	t1s,	initr_time0_setsnd	; count wrap around for 1s
+	TimeCount	t100ms,	intr_time0_setsnd	; count wrap around for 100ms
+	TimeCount	t1s,	intr_time0_setsnd	; count wrap around for 1s
 
-initr_time0_setsnd:
+intr_time0_setsnd:
 	; generate sound
 	rcall	set_freq						; called every 100ms
 
@@ -322,47 +321,70 @@ intr_time0_end:
 
 ;=============================================================
 ; set sound frequency
+; supporsed to be called every 100ms
 ;=============================================================
 set_freq:
-	cp		mcnt, mtop
+	cpi		cur_data_id, SNDDATA_ID_LV0	; if cur_data_id != null, go to increment
+	brne	set_freq_inc
+	; if it reached here, cur_data_id is nothing
+	cpi		nxt_data_id, SNDDATA_ID_LV0
+	breq	set_freq_ext
+	; if it reached here, play nxt_data_id
+	rjmp	set_freq_nxt
+
+set_freq_inc:
+	mov		acc, mcnt
 	inc		mcnt
-	brlt	set_freq_exit	; if mcnt<mtop, do nothing
-	clr		mcnt
+	cp		acc, mtop
+	brlt	set_freq_ext	; if mcnt<mtop, do nothing
 
 	; check more data left
-	cp		zl, curdata_edl
+	cp		zl, cur_data_edl
 	brne	set_freq_asgn
-	cp		zh, curdata_edh
+	cp		zh, cur_data_edh
 	brne	set_freq_asgn
+	clr		mcnt
 
-	mov		acc, nxtdata_id
+set_freq_nxt:
 	rcall	load_snd_for_id
+
+	cpi		cur_data_id, SNDDATA_ID_LV0
+	breq	set_freq_ext
+	clr		scnt
+	clr		mcnt
+	rjmp	set_freq_ext
 
 set_freq_asgn:
 	lpm		mtop, z+		; initialize tcnt compare value
 	lpm		sctop, z+		; count untill scnt becomes this value
 	clr		scnt
-set_freq_exit:
+	clr		mcnt
+set_freq_ext:
+
+	;debug
+	out		PRT_LV, sctop
+
 	ret
 
 ;=============================================================
 ; sound frequency pwm
+; supporsed to be called every 10us
 ;=============================================================
 snd_pwm:
-	cpi		curdata_id, SNDDATA_ID_LV0
+	cpi		cur_data_id, SNDDATA_ID_LV0
 	breq	snd_pwm_mute
 	rjmp	snd_pwm_out
 snd_pwm_mute:
 	cbi		PRT_SND, 1<<PIN_SND
 	ret
 snd_pwm_out:
-	cp		scnt, sctop
+	mov		acc, scnt
 	inc		scnt
+	cp		acc, sctop
 	brlt	snd_pwm_ext
 	FlipOut	PRT_SND, 1<<PIN_SND
 	clr		scnt
 snd_pwm_ext:
-	inc		mcnt
 	ret
 
 ;=============================================================
@@ -400,7 +422,7 @@ readv_y:
 	add		vval, vread
 	lsr		vval
 readv_compare:
-	cpi		vval, 26-SENSITIVITY
+	/*cpi		vval, 26-SENSITIVITY
 	brlt	readv_level0
 	cpi		vval, 28-SENSITIVITY
 	brlt	readv_level1
@@ -408,7 +430,7 @@ readv_compare:
 	brlt	readv_level2
 	cpi		vval, 32-SENSITIVITY
 	brlt	readv_level3
-	cpi		vval, 34-SENSITIVITY
+	cpi		vval, 34-SENSITIVITY*/
 	rjmp	readv_level4
 readv_level0:
 	ldi		acc, INPUT_LV0
@@ -431,9 +453,9 @@ readv_level4:
 	ldi		acc2, 0b0001_1111
 	rjmp readv_ext
 readv_ext:
-	rcall	select_snd
+	rcall	sel_nxt_snd
 #ifdef ATMEGA168
-	out		PRT_LV, acc2
+	;out		PRT_LV, acc2
 #endif
 #ifdef ATTINY45
 	sbi		PRT_LV, PIN_LV
@@ -441,82 +463,88 @@ readv_ext:
 	ret
 
 ;=============================================================
-; set input level
+; select next sound
+; set sound id to nxtdata_id register
 ;=============================================================
-select_snd:
+sel_nxt_snd:
 	cpi		acc, INPUT_LV0
-	breq	select_snd_lv0
+	breq	sel_nxt_snd_lv0
 	cpi		acc, INPUT_LV1
-	breq	select_snd_lv1
+	breq	sel_nxt_snd_lv1
 	cpi		acc, INPUT_LV2
-	breq	select_snd_lv2
+	breq	sel_nxt_snd_lv2
 	cpi		acc, INPUT_LV3
-	breq	select_snd_lv3
+	breq	sel_nxt_snd_lv3
 	cpi		acc, INPUT_LV4
-	breq	select_snd_lv4
-select_snd_lv0:
+	breq	sel_nxt_snd_lv4
+sel_nxt_snd_lv0:
 	ldi		acc, SNDDATA_ID_LV0
-	rjmp	select_snd_ext
-select_snd_lv1:
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_lv1:
 	ldi		acc, SNDDATA_ID_LV1
-	rjmp	select_snd_ext
-select_snd_lv2:
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_lv2:
 	ldi		acc, SNDDATA_ID_LV2
-	rjmp	select_snd_ext
-select_snd_lv3:
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_lv3:
 	ldi		acc, SNDDATA_ID_LV3
-	rjmp	select_snd_ext
-select_snd_lv4:
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_lv4:
 	ldi		acc, SNDDATA_ID_LV4_1
-	rjmp	select_snd_ext
-select_snd_ext:
-	mov nxtdata_id, acc
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_ext:
+	mov nxt_data_id, acc
 	ret
 
+;=============================================================
+; select next sound
+; set sound id to nxt_data_id register
+;=============================================================
 load_snd_for_id:
-	cpi		acc, 0
-	breq	load_snd_for_id_lv0
-	cpi		acc, SNDDATA_ID_LV0
+	cpi		nxt_data_id, SNDDATA_ID_LV0
 	breq	load_snd_for_id_lv1
-	cpi		acc, SNDDATA_ID_LV1
+	cpi		nxt_data_id, SNDDATA_ID_LV1
 	breq	load_snd_for_id_lv2
-	cpi		acc, SNDDATA_ID_LV2
+	cpi		nxt_data_id, SNDDATA_ID_LV2
 	breq	load_snd_for_id_lv3
-	cpi		acc, SNDDATA_ID_LV3
+	cpi		nxt_data_id, SNDDATA_ID_LV3
 	breq	load_snd_for_id_lv4_1
-	cpi		acc, SNDDATA_ID_LV4_1
+	cpi		nxt_data_id, SNDDATA_ID_LV4_1
 	breq	load_snd_for_id_lv4_2
-	cpi		acc, SNDDATA_ID_LV4_2
+	cpi		nxt_data_id, SNDDATA_ID_LV4_2
 	breq	load_snd_for_id_lv4_3
-	cpi		acc, SNDDATA_ID_LV4_3
+	cpi		nxt_data_id, SNDDATA_ID_LV4_3
 	breq	load_snd_for_id_lv4_4
-	cpi		acc, SNDDATA_ID_LV4_4
+	cpi		nxt_data_id, SNDDATA_ID_LV4_4
 load_snd_for_id_lv0:
 	SetData	0, 0
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv1:
 	SetData	SND_LV1, SND_LV1_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv2:
 	SetData	SND_LV2, SND_LV2_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv3:
 	SetData	SND_LV3, SND_LV3_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv4_1:
 	SetData	SND_LV4_1, SND_LV4_1_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv4_2:
 	SetData	SND_LV4_2, SND_LV4_2_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv4_3:
 	SetData	SND_LV4_3, SND_LV4_3_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv4_4:
 	SetData	SND_LV4_4, SND_LV4_4_END
-	rjmp	select_snd_ext
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_ext:
-	mov		nxtdata_id, acc
+	clr		mcnt
+	clr		scnt
+	mov		cur_data_id, nxt_data_id
+	clr		nxt_data_id
 	ret
 
 ;=============================================================
