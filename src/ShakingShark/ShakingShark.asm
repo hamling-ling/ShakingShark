@@ -100,8 +100,6 @@
 .def vread		= r17	; voltage displacement read in process
 .def cur_data_id	= r18
 .def nxt_data_id	= r19
-;.def cur_data_sth	= r20	; current phrase data start high address
-;.def cur_data_stl	= r21	; current phrase data start low address
 .def cur_data_edh	= r22	; current phrase data end high address
 .def cur_data_edl	= r23	; current phrase data end low address
 .def acc		= r24	; accumulator
@@ -146,7 +144,7 @@
 	.if @1 < 0x40 
 		in @0, @1 
 	.elif ((@1 >= 0x60) && (@1 < SRAM_START)) 
-         lds @0,@1 
+		lds @0,@1 
 	.else 
 		.error "InReg: Invalid I/O register address" 
 	.endif 
@@ -378,10 +376,9 @@ snd_pwm_mute:
 	cbi		PRT_SND, 1<<PIN_SND
 	ret
 snd_pwm_out:
-	mov		acc, scnt
 	inc		scnt
-	cp		acc, sctop
-	brlt	snd_pwm_ext
+	cp		scnt, sctop
+	brlo	snd_pwm_ext
 	FlipOut	PRT_SND, 1<<PIN_SND
 	clr		scnt
 snd_pwm_ext:
@@ -423,13 +420,13 @@ readv_y:
 	lsr		vval
 readv_compare:
 	/*cpi		vval, 26-SENSITIVITY
-	brlt	readv_level0
+	brlo	readv_level0
 	cpi		vval, 28-SENSITIVITY
-	brlt	readv_level1
+	brlo	readv_level1
 	cpi		vval, 30-SENSITIVITY
-	brlt	readv_level2
+	brlo	readv_level2
 	cpi		vval, 32-SENSITIVITY
-	brlt	readv_level3
+	brlo	readv_level3
 	cpi		vval, 34-SENSITIVITY*/
 	rjmp	readv_level4
 readv_level0:
@@ -502,20 +499,22 @@ sel_nxt_snd_ext:
 ;=============================================================
 load_snd_for_id:
 	cpi		nxt_data_id, SNDDATA_ID_LV0
-	breq	load_snd_for_id_lv1
+	breq	load_snd_for_id_lv0
 	cpi		nxt_data_id, SNDDATA_ID_LV1
-	breq	load_snd_for_id_lv2
+	breq	load_snd_for_id_lv1
 	cpi		nxt_data_id, SNDDATA_ID_LV2
-	breq	load_snd_for_id_lv3
+	breq	load_snd_for_id_lv2
 	cpi		nxt_data_id, SNDDATA_ID_LV3
-	breq	load_snd_for_id_lv4_1
+	breq	load_snd_for_id_lv3
 	cpi		nxt_data_id, SNDDATA_ID_LV4_1
-	breq	load_snd_for_id_lv4_2
+	breq	load_snd_for_id_lv4_1
 	cpi		nxt_data_id, SNDDATA_ID_LV4_2
-	breq	load_snd_for_id_lv4_3
+	breq	load_snd_for_id_lv4_2
 	cpi		nxt_data_id, SNDDATA_ID_LV4_3
-	breq	load_snd_for_id_lv4_4
+	breq	load_snd_for_id_lv4_3
 	cpi		nxt_data_id, SNDDATA_ID_LV4_4
+	breq	load_snd_for_id_lv4_4
+	rjmp	load_snd_for_id_lv0
 load_snd_for_id_lv0:
 	SetData	0, 0
 	rjmp	load_snd_for_id_ext
