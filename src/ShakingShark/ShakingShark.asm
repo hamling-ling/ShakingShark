@@ -376,6 +376,9 @@ set_freq_ext:
 snd_pwm:
 	cpi		cur_data_id, SNDDATA_ID_LV0
 	breq	snd_pwm_mute
+	ldi		acc, 0
+	cp		sctop, acc
+	breq	snd_pwm_clr
 	rjmp	snd_pwm_out
 snd_pwm_mute:
 	cbi		PRT_SND, PIN_SND
@@ -384,7 +387,10 @@ snd_pwm_out:
 	inc		scnt
 	cp		scnt, sctop
 	brlo	snd_pwm_ext
+	;cp		scnt, sctop
+	;breq	snd_pwm_clr
 	FlipOut	PRT_SND, 1<<PIN_SND
+snd_pwm_clr:
 	clr		scnt
 snd_pwm_ext:
 	ret
@@ -565,6 +571,7 @@ PRS1:
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
+	.db NOTE_8, TONE_NONE
 	.db NOTE_8, TONE_NONE
 	.db NOTE_8, TONE_NONE
 PRS1_END:
