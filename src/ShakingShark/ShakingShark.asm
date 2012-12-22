@@ -76,7 +76,8 @@
 .equ SNDDATA_ID_LV5 = 5
 .equ SNDDATA_ID_LV6 = 6
 .equ SNDDATA_ID_LV7 = 7
-.equ SNDDATA_ID_MAX = SNDDATA_ID_LV7
+.equ SNDDATA_ID_LV8 = 8
+.equ SNDDATA_ID_MAX = SNDDATA_ID_LV8
 
 ;=============================================================
 ; variables
@@ -94,8 +95,8 @@
 .def mcnt		= r10	; t100ms counter
 .def mtop		= r11	; tcnt top value
 .def scnt		= r12	; compare to scnt for rythm
-.def vval		= r16	; last applied voltage displacement
-.def vread		= r17	; voltage displacement read in process
+.def vval			= r16	; last applied voltage displacement
+.def vread			= r17	; voltage displacement read in process
 .def cur_data_id	= r18
 .def nxt_data_id	= r19
 .def cur_data_edh	= r20	; current phrase data end high address
@@ -121,8 +122,8 @@
 	out		SREG, sreg_save	; restore sreg
 .endmacro
 
-; time count
-.macro TimeCount		; TIME_COUNT @0 @1
+; ten count
+.macro TimeCount10		; TIME_COUNT @0 @1
 	inc		@0			; increment register given by @0
 	cp		@0, ten		; compare the register
 	brne	@1			; if the register != 10 jump to @1
@@ -289,13 +290,12 @@ intr_time0:
 	ldi		acc, PRE_SCALE
 	out		tccr0b, acc
 
-	TimeCount	t10us,	intr_time0_sndpwm	; count wrap around for 10us
-	TimeCount	t100us,	intr_time0_sndpwm	; count wrap around for 100us
-	TimeCount	t1ms,	intr_time0_sndpwm	; count wrap around for 1ms
-	TimeCount	t10ms,	intr_time0_sndpwm	; count wrap around for 10ms
-	TimeCount	t100ms,	intr_time0_setsnd	; count wrap around for 100ms
-	TimeCount	t1s,	intr_time0_setsnd	; count wrap around for 1s
-
+	TimeCount10	t10us,	intr_time0_sndpwm	; count wrap around for 10us
+	TimeCount10	t100us,	intr_time0_sndpwm	; count wrap around for 100us
+	TimeCount10	t1ms,	intr_time0_sndpwm	; count wrap around for 1ms
+	TimeCount10	t10ms,	intr_time0_sndpwm	; count wrap around for 10ms
+	TimeCount10	t100ms,	intr_time0_setsnd	; count wrap around for 100ms
+	TimeCount10	t1s,	intr_time0_setsnd
 intr_time0_setsnd:
 	; generate sound
 	rcall	set_freq						; called every 100ms
@@ -361,7 +361,7 @@ set_freq_asgn:
 	lpm		mtop, z+		; initialize tcnt compare value
 	lpm		sctop, z+		; count untill scnt becomes this value
 	clr		scnt
-	clr		mcnt
+	mov		mcnt, one
 set_freq_ext:
 
 	;debug
@@ -487,7 +487,7 @@ sel_nxt_snd_lv0:
 sel_nxt_snd_lv1:
 	mov		acc, cur_data_id
 	inc		acc
-	cpi		acc, SNDDATA_ID_MAX
+	cpi		acc, SNDDATA_ID_MAX+1
 	brlo	sel_nxt_snd_ext
 	ldi		acc, SNDDATA_ID_LV4
 sel_nxt_snd_ext:
@@ -515,6 +515,8 @@ load_snd_for_id:
 	breq	load_snd_for_id_lv6
 	cpi		nxt_data_id, SNDDATA_ID_LV7
 	breq	load_snd_for_id_lv7
+	cpi		nxt_data_id, SNDDATA_ID_LV8
+	breq	load_snd_for_id_lv8
 	rjmp	load_snd_for_id_lv0
 load_snd_for_id_lv0:
 	SetData	0, 0
@@ -540,11 +542,18 @@ load_snd_for_id_lv6:
 load_snd_for_id_lv7:
 	SetData	PRS7, PRS7_END
 	rjmp	load_snd_for_id_ext
+load_snd_for_id_lv8:
+	SetData	PRS8, PRS8_END
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_ext:
 	clr		mcnt
 	clr		scnt
 	mov		cur_data_id, nxt_data_id
 	clr		nxt_data_id
+
+	;debug
+	;out		PRT_LV, cur_data_id
+
 	ret
 
 ;=============================================================
