@@ -20,9 +20,9 @@
 .include "m168def.inc"	;
 .equ PRT_LV		= portb	; port for level indicator
 .equ DDR_LV		= ddrb	; ddr  for PRT_LV
-.equ PRT_SND	= portd	; port for sound pwm
-.equ DDR_SND	= ddrd	; ddr for PRT_SND
-.equ PIN_SND	= 0		; pin for above
+.equ PRT_SND	= portc	; port for sound pwm
+.equ DDR_SND	= ddrc	; ddr for PRT_SND
+.equ PIN_SND	= 5		; pin for above
 .equ PRT_ACCX	= portc	; port for x-axis accelerometer read
 .equ DDR_ACCX	= ddrc	; ddr for PRT_ACCX
 .equ PIN_ACCX	= 0		; pin for above
@@ -68,9 +68,6 @@
 .equ ZEROGREADY	= 129	; same for y-axis
 .equ INPUT_LV0	= 0		; input level 0
 .equ INPUT_LV1	= 1		; input level 1
-.equ INPUT_LV2	= 2		; input level 2
-.equ INPUT_LV3	= 3		; input level 3
-.equ INPUT_LV4	= 4		; input level 4
 .equ SNDDATA_ID_LV0 = 0
 .equ SNDDATA_ID_LV1 = 1
 .equ SNDDATA_ID_LV2 = 2
@@ -79,6 +76,7 @@
 .equ SNDDATA_ID_LV5 = 5
 .equ SNDDATA_ID_LV6 = 6
 .equ SNDDATA_ID_LV7 = 7
+.equ SNDDATA_ID_MAX = SNDDATA_ID_LV7
 
 ;=============================================================
 ; variables
@@ -380,7 +378,7 @@ snd_pwm:
 	breq	snd_pwm_mute
 	rjmp	snd_pwm_out
 snd_pwm_mute:
-	cbi		PRT_SND, 1<<PIN_SND
+	cbi		PRT_SND, PIN_SND
 	ret
 snd_pwm_out:
 	inc		scnt
@@ -431,32 +429,38 @@ readv_y:
 readv_compare:
 	cpi		vval, 26-SENSITIVITY
 	brlo	readv_level0
-	cpi		vval, 28-SENSITIVITY
+	cpi		vval, 27-SENSITIVITY
 	brlo	readv_level1
-	cpi		vval, 30-SENSITIVITY
+	cpi		vval, 28-SENSITIVITY
 	brlo	readv_level2
-	cpi		vval, 32-SENSITIVITY
+	cpi		vval, 29-SENSITIVITY
 	brlo	readv_level3
-	cpi		vval, 34-SENSITIVITY
-	rjmp	readv_level4
+	cpi		vval, 30-SENSITIVITY
+	brlo	readv_level4
+	cpi		vval, 31-SENSITIVITY
+	rjmp	readv_level5
 readv_level0:
+	ldi		acc, INPUT_LV0
+	ldi		acc2, 0b0000_0000
+	rjmp readv_ext
+readv_level1:
 	ldi		acc, INPUT_LV0
 	ldi		acc2, 0b0000_0001
 	rjmp readv_ext
-readv_level1:
+readv_level2:
 	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0000_0011
 	rjmp readv_ext
-readv_level2:
-	ldi		acc, INPUT_LV2
+readv_level3:
+	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0000_0111
 	rjmp readv_ext
-readv_level3:
-	ldi		acc, INPUT_LV3
+readv_level4:
+	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0000_1111
 	rjmp readv_ext
-readv_level4:
-	ldi		acc, INPUT_LV4
+readv_level5:
+	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0001_1111
 	rjmp readv_ext
 readv_ext:
@@ -476,29 +480,16 @@ readv_ext:
 sel_nxt_snd:
 	cpi		acc, INPUT_LV0
 	breq	sel_nxt_snd_lv0
-	cpi		acc, INPUT_LV1
-	breq	sel_nxt_snd_lv1
-	cpi		acc, INPUT_LV2
-	breq	sel_nxt_snd_lv2
-	cpi		acc, INPUT_LV3
-	breq	sel_nxt_snd_lv3
-	cpi		acc, INPUT_LV4
-	breq	sel_nxt_snd_lv4
+	rjmp	sel_nxt_snd_lv1
 sel_nxt_snd_lv0:
 	ldi		acc, SNDDATA_ID_LV0
 	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_lv1:
-	ldi		acc, SNDDATA_ID_LV1
-	rjmp	sel_nxt_snd_ext
-sel_nxt_snd_lv2:
-	ldi		acc, SNDDATA_ID_LV2
-	rjmp	sel_nxt_snd_ext
-sel_nxt_snd_lv3:
-	ldi		acc, SNDDATA_ID_LV3
-	rjmp	sel_nxt_snd_ext
-sel_nxt_snd_lv4:
+	mov		acc, cur_data_id
+	inc		acc
+	cpi		acc, SNDDATA_ID_MAX
+	brlo	sel_nxt_snd_ext
 	ldi		acc, SNDDATA_ID_LV4
-	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_ext:
 	mov nxt_data_id, acc
 	ret
