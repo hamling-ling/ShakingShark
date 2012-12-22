@@ -57,28 +57,28 @@
 ; constants
 ;=============================================================
 #ifdef DEBUG
-.equ SENSITIVITY = 26	; sensitivity
+.equ SENSITIVITY = 16	; sensitivity
 #else
 .equ SENSITIVITY = 0	; sensitivity
 #endif
 .equ T10USEC	= 248	; Pre Scale=1/8, 100KHz
 .equ PRE_SCALE	= 0x2	; 1/8
 .equ VCNTMAX	= 20	; max valu of vcnt
-.equ ZEROGREADX	= 128	; 0g value of accerelometer read along x-axis
-.equ ZEROGREADY	= 128	; same for y-axis
+.equ ZEROGREADX	= 123	; 0g value of accerelometer read along x-axis
+.equ ZEROGREADY	= 129	; same for y-axis
 .equ INPUT_LV0	= 0		; input level 0
 .equ INPUT_LV1	= 1		; input level 1
 .equ INPUT_LV2	= 2		; input level 2
 .equ INPUT_LV3	= 3		; input level 3
 .equ INPUT_LV4	= 4		; input level 4
-.equ SNDDATA_ID_LV0		= 0
-.equ SNDDATA_ID_LV1		= 1
-.equ SNDDATA_ID_LV2		= 2
-.equ SNDDATA_ID_LV3		= 3
-.equ SNDDATA_ID_LV4_1	= 4
-.equ SNDDATA_ID_LV4_2	= 5
-.equ SNDDATA_ID_LV4_3	= 6
-.equ SNDDATA_ID_LV4_4	= 7
+.equ SNDDATA_ID_LV0 = 0
+.equ SNDDATA_ID_LV1 = 1
+.equ SNDDATA_ID_LV2 = 2
+.equ SNDDATA_ID_LV3 = 3
+.equ SNDDATA_ID_LV4 = 4
+.equ SNDDATA_ID_LV5 = 5
+.equ SNDDATA_ID_LV6 = 6
+.equ SNDDATA_ID_LV7 = 7
 
 ;=============================================================
 ; variables
@@ -100,10 +100,10 @@
 .def vread		= r17	; voltage displacement read in process
 .def cur_data_id	= r18
 .def nxt_data_id	= r19
-.def cur_data_edh	= r22	; current phrase data end high address
-.def cur_data_edl	= r23	; current phrase data end low address
-.def acc		= r24	; accumulator
-.def acc2		= r25	; accumulator2
+.def cur_data_edh	= r20	; current phrase data end high address
+.def cur_data_edl	= r21	; current phrase data end low address
+.def acc		= r22	; accumulator
+.def acc2		= r23	; accumulator2
 
 ;=============================================================
 ; macro
@@ -262,6 +262,7 @@ main:
 
 	; initialize adc
 	clr		vread
+	clr		vval
 	ldi		acc, ADMUXVAL
 	OutReg	ADMUX, acc
 	ldi		acc, ADCSRAVAL
@@ -303,9 +304,15 @@ intr_time0_setsnd:
 
 	; request adc interruption
 	InReg	acc, ADMUX
+#ifdef ATMEGA168
+	ldi		acc2, (1<<MUX0)
+#endif
+#ifdef ATTINY45
 	ldi		acc2, (1<<MUX1)|(1<<MUX0)
+#endif
 	eor		acc, acc2
 	OutReg	ADMUX, acc
+
 	ldi		acc, ADCSRAVAL
 	OutReg	ADCSRA, acc
 
@@ -360,7 +367,7 @@ set_freq_asgn:
 set_freq_ext:
 
 	;debug
-	out		PRT_LV, sctop
+	;out		PRT_LV, sctop
 
 	ret
 
@@ -404,11 +411,13 @@ readv:
 
 	clc
 	InReg	acc, ADCH			; read D/A converted value
-	sub		acc, acc2			; acc-netral value
+	sbc		acc, acc2			; acc-netral value
 	brpl	readv_positive		; if acc-acc2 > 0, goto readv_positive
 	neg		acc					; else take absolute value
 readv_positive:
+
 	InReg	acc2, ADMUX
+
 	sbrc	acc2, 0
 	rjmp	readv_y
 readv_x:
@@ -418,8 +427,9 @@ readv_y:
 	add		vread, acc
 	add		vval, vread
 	lsr		vval
+
 readv_compare:
-	/*cpi		vval, 26-SENSITIVITY
+	cpi		vval, 26-SENSITIVITY
 	brlo	readv_level0
 	cpi		vval, 28-SENSITIVITY
 	brlo	readv_level1
@@ -427,7 +437,7 @@ readv_compare:
 	brlo	readv_level2
 	cpi		vval, 32-SENSITIVITY
 	brlo	readv_level3
-	cpi		vval, 34-SENSITIVITY*/
+	cpi		vval, 34-SENSITIVITY
 	rjmp	readv_level4
 readv_level0:
 	ldi		acc, INPUT_LV0
@@ -452,7 +462,7 @@ readv_level4:
 readv_ext:
 	rcall	sel_nxt_snd
 #ifdef ATMEGA168
-	;out		PRT_LV, acc2
+	out		PRT_LV, acc2
 #endif
 #ifdef ATTINY45
 	sbi		PRT_LV, PIN_LV
@@ -487,7 +497,7 @@ sel_nxt_snd_lv3:
 	ldi		acc, SNDDATA_ID_LV3
 	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_lv4:
-	ldi		acc, SNDDATA_ID_LV4_1
+	ldi		acc, SNDDATA_ID_LV4
 	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_ext:
 	mov nxt_data_id, acc
@@ -506,38 +516,38 @@ load_snd_for_id:
 	breq	load_snd_for_id_lv2
 	cpi		nxt_data_id, SNDDATA_ID_LV3
 	breq	load_snd_for_id_lv3
-	cpi		nxt_data_id, SNDDATA_ID_LV4_1
-	breq	load_snd_for_id_lv4_1
-	cpi		nxt_data_id, SNDDATA_ID_LV4_2
-	breq	load_snd_for_id_lv4_2
-	cpi		nxt_data_id, SNDDATA_ID_LV4_3
-	breq	load_snd_for_id_lv4_3
-	cpi		nxt_data_id, SNDDATA_ID_LV4_4
-	breq	load_snd_for_id_lv4_4
+	cpi		nxt_data_id, SNDDATA_ID_LV4
+	breq	load_snd_for_id_lv4
+	cpi		nxt_data_id, SNDDATA_ID_LV5
+	breq	load_snd_for_id_lv5
+	cpi		nxt_data_id, SNDDATA_ID_LV6
+	breq	load_snd_for_id_lv6
+	cpi		nxt_data_id, SNDDATA_ID_LV7
+	breq	load_snd_for_id_lv7
 	rjmp	load_snd_for_id_lv0
 load_snd_for_id_lv0:
 	SetData	0, 0
 	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv1:
-	SetData	SND_LV1, SND_LV1_END
+	SetData	PRS1, PRS1_END
 	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv2:
-	SetData	SND_LV2, SND_LV2_END
+	SetData	PRS2, PRS2_END
 	rjmp	load_snd_for_id_ext
 load_snd_for_id_lv3:
-	SetData	SND_LV3, SND_LV3_END
+	SetData	PRS3, PRS3_END
 	rjmp	load_snd_for_id_ext
-load_snd_for_id_lv4_1:
-	SetData	SND_LV4_1, SND_LV4_1_END
+load_snd_for_id_lv4:
+	SetData	PRS4, PRS4_END
 	rjmp	load_snd_for_id_ext
-load_snd_for_id_lv4_2:
-	SetData	SND_LV4_2, SND_LV4_2_END
+load_snd_for_id_lv5:
+	SetData	PRS5, PRS5_END
 	rjmp	load_snd_for_id_ext
-load_snd_for_id_lv4_3:
-	SetData	SND_LV4_3, SND_LV4_3_END
+load_snd_for_id_lv6:
+	SetData	PRS6, PRS6_END
 	rjmp	load_snd_for_id_ext
-load_snd_for_id_lv4_4:
-	SetData	SND_LV4_4, SND_LV4_4_END
+load_snd_for_id_lv7:
+	SetData	PRS7, PRS7_END
 	rjmp	load_snd_for_id_ext
 load_snd_for_id_ext:
 	clr		mcnt
@@ -550,16 +560,16 @@ load_snd_for_id_ext:
 ; data
 ;=============================================================
 
-SND_LV1:
+PRS1:
 	.db NOTE_8, TONE_1E		;ta-da
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
 	.db NOTE_8, TONE_NONE
 	.db NOTE_8, TONE_NONE
-SND_LV1_END:
+PRS1_END:
 
-SND_LV2:
+PRS2:
 	.db NOTE_8, TONE_1E		;ta-da,ta-da
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
@@ -568,28 +578,40 @@ SND_LV2:
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
-SND_LV2_END:
+PRS2_END:
 
-SND_LV3:
+PRS3:
 	.db NOTE_32, TONE_1E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
-SND_LV3_END:
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+PRS3_END:
 
-SND_LV4_1:
+PRS4:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_2G
 	.db NOTE_WL, TONE_2AS
-SND_LV4_1_END:
+PRS4_END:
 
-SND_LV4_2:
+PRS5:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_2G
 	.db NOTE_WL, TONE_3C
-SND_LV4_2_END:
+PRS5_END:
 
-SND_LV4_3:
+PRS6:
 	.db NOTE_8, TONE_3E
 	.db NOTE_8, TONE_2B
 	.db NOTE_8, TONE_3FS
@@ -610,9 +632,9 @@ SND_LV4_3:
 	.db NOTE_8, TONE_3CS
 	.db NOTE_4, TONE_2B
 	.db NOTE_8, TONE_2B
-SND_LV4_3_END:
+PRS6_END:
 
-SND_LV4_4:
+PRS7:
 	.db NOTE_32, TONE_1E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
@@ -629,9 +651,9 @@ SND_LV4_4:
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
-SND_LV4_4_END:
+PRS7_END:
 
-SND_LV4_5:
+PRS8:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_2F
@@ -650,9 +672,9 @@ SND_LV4_5:
 	.db NOTE_32, TONE_NONE
 
 	.db NOTE_4, TONE_NONE
-SND_LV4_5_END:
+PRS8_END:
 
 ;=============================================================
 ;=============================================================
-;		   END
+;		END
 ;=============================================================
