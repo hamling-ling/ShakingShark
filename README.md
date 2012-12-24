@@ -28,11 +28,12 @@ Initial state is p0 which is mute and plays nothing.
 Then input lv1 detected, state transit to p1 and play that sound.
 
 
-    |    phrase|mute   |ta-dan...  |ta-da*2|tada*4 |talala-|talari-|tararira   |taratara   |tada*4 |..chacha   |
-    |input     |p0     |p1         |p2     |p3     |p4     |p5     |p6         |p7         |p8     |p9         |
-    |----------------------------------------------------------------------------------------------------------|
-    |lv0       |-      |p0         |p0     |p0     |p0     |p0     |p0         |p0         |p0     |p0         |
-    |lv1       |p1     |p2         |p3     |p4     |p5     |p6     |p7         |p8         |p9     |p3         |
+    |    phrase|mute   |ta--da  |ta--da*2|tada*4 |talala-|talari-|tararira|taratara |tada*4 |..chacha|
+    |input     |p0     |p1      |p2      |p3     |p4     |p5     |p6      |p7       |p8     |p9      |
+    |------------------------------------------------------------------------------------------------|
+    |lv0       |-      |p0      |p0      |p0     |p0     |p0     |p0      |p0       |p0     |p0      |
+    |lv1       |p1     |p2      |p3      |p4     |p4     |p4     |p4      |p4       |p4     |p4      |
+    |lv2       |p3     |p3      |p3      |p4     |p5     |p6     |p7      |p8       |p9     |p4      |
     
     -:do nothing
 
