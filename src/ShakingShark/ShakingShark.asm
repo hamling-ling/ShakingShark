@@ -68,6 +68,7 @@
 .equ ZEROGREADY	= 129	; same for y-axis
 .equ INPUT_LV0	= 0		; input level 0
 .equ INPUT_LV1	= 1		; input level 1
+.equ INPUT_LV2	= 2		; input level 2
 .equ SNDDATA_ID_LV0 = 0
 .equ SNDDATA_ID_LV1 = 1
 .equ SNDDATA_ID_LV2 = 2
@@ -77,7 +78,8 @@
 .equ SNDDATA_ID_LV6 = 6
 .equ SNDDATA_ID_LV7 = 7
 .equ SNDDATA_ID_LV8 = 8
-.equ SNDDATA_ID_MAX = SNDDATA_ID_LV8
+.equ SNDDATA_ID_LV9 = 9
+.equ SNDDATA_ID_MAX = SNDDATA_ID_LV9
 
 ;=============================================================
 ; variables
@@ -166,8 +168,8 @@
 	ldi		zh, high(@0<<1)
 	ldi		cur_data_edl, low(@1<<1)
 	ldi		cur_data_edh, high(@1<<1)
-	lpm		mtop, z+		; initialize tcnt compare value
-	lpm		sctop, z+		; count untill scnt becomes this value
+	;lpm		mtop, z+		; initialize tcnt compare value
+	;lpm		sctop, z+		; count untill scnt becomes this value
 .endmacro 
 
 ;=============================================================
@@ -355,6 +357,7 @@ set_freq_nxt:
 	breq	set_freq_ext
 	clr		scnt
 	clr		mcnt
+	mov		mcnt, one
 	rjmp	set_freq_ext
 
 set_freq_asgn:
@@ -450,23 +453,23 @@ readv_level0:
 	ldi		acc2, 0b0000_0000
 	rjmp readv_ext
 readv_level1:
-	ldi		acc, INPUT_LV0
-	ldi		acc2, 0b0000_0001
+	ldi		acc, INPUT_LV1
+	ldi		acc2, 0b1000_0001
 	rjmp readv_ext
 readv_level2:
 	ldi		acc, INPUT_LV1
-	ldi		acc2, 0b0000_0011
+	ldi		acc2, 0b1000_0011
 	rjmp readv_ext
 readv_level3:
-	ldi		acc, INPUT_LV1
+	ldi		acc, INPUT_LV2
 	ldi		acc2, 0b0000_0111
 	rjmp readv_ext
 readv_level4:
-	ldi		acc, INPUT_LV1
+	ldi		acc, INPUT_LV2
 	ldi		acc2, 0b0000_1111
 	rjmp readv_ext
 readv_level5:
-	ldi		acc, INPUT_LV1
+	ldi		acc, INPUT_LV2
 	ldi		acc2, 0b0001_1111
 	rjmp readv_ext
 readv_ext:
@@ -486,11 +489,20 @@ readv_ext:
 sel_nxt_snd:
 	cpi		acc, INPUT_LV0
 	breq	sel_nxt_snd_lv0
-	rjmp	sel_nxt_snd_lv1
+	cpi		acc, INPUT_LV1
+	breq	sel_nxt_snd_lv1
+	rjmp	sel_nxt_snd_lv2
 sel_nxt_snd_lv0:
 	ldi		acc, SNDDATA_ID_LV0
 	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_lv1:
+	mov		acc, cur_data_id
+	inc		acc
+	cpi		acc, SNDDATA_ID_LV4+1
+	brlo	sel_nxt_snd_ext
+	ldi		acc, SNDDATA_ID_LV4
+	rjmp	sel_nxt_snd_ext
+sel_nxt_snd_lv2:
 	mov		acc, cur_data_id
 	inc		acc
 	cpi		acc, SNDDATA_ID_MAX+1
@@ -523,6 +535,8 @@ load_snd_for_id:
 	breq	load_snd_for_id_lv7
 	cpi		nxt_data_id, SNDDATA_ID_LV8
 	breq	load_snd_for_id_lv8
+	cpi		nxt_data_id, SNDDATA_ID_LV9
+	breq	load_snd_for_id_lv9
 	rjmp	load_snd_for_id_lv0
 load_snd_for_id_lv0:
 	SetData	0, 0
@@ -551,7 +565,12 @@ load_snd_for_id_lv7:
 load_snd_for_id_lv8:
 	SetData	PRS8, PRS8_END
 	rjmp	load_snd_for_id_ext
+load_snd_for_id_lv9:
+	SetData	PRS9, PRS9_END
+	rjmp	load_snd_for_id_ext
 load_snd_for_id_ext:
+	lpm		mtop, z+		; initialize tcnt compare value
+	lpm		sctop, z+		; count untill scnt becomes this value
 	clr		mcnt
 	clr		scnt
 	mov		cur_data_id, nxt_data_id
@@ -567,16 +586,25 @@ load_snd_for_id_ext:
 ;=============================================================
 
 PRS1:
-	.db NOTE_8, TONE_1E		;ta-da
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
+	.db NOTE_4, TONE_1E		;ta--da
+	.db NOTE_16, TONE_1F
 	.db NOTE_16, TONE_NONE
 	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
-	.db NOTE_8, TONE_NONE
+	.db NOTE_4, TONE_NONE
 PRS1_END:
 
 PRS2:
+	.db NOTE_4, TONE_1E		;ta--da,ta--da
+	.db NOTE_16, TONE_1F
+	.db NOTE_16, TONE_NONE
+	.db NOTE_8, TONE_NONE
+	.db NOTE_4, TONE_1E
+	.db NOTE_16, TONE_1F
+	.db NOTE_16, TONE_NONE
+	.db NOTE_8, TONE_NONE
+PRS2_END:
+
+PRS3:
 	.db NOTE_8, TONE_1E		;ta-da,ta-da
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
@@ -585,40 +613,41 @@ PRS2:
 	.db NOTE_32, TONE_1F
 	.db NOTE_32, TONE_NONE
 	.db NOTE_16, TONE_NONE
-PRS2_END:
-
-PRS3:
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
 PRS3_END:
 
+
 PRS4:
-	.db NOTE_32, TONE_2E
-	.db NOTE_32, TONE_2G
-	.db NOTE_WL, TONE_2AS
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
 PRS4_END:
 
 PRS5:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_2G
-	.db NOTE_WL, TONE_3C
+	.db NOTE_WL, TONE_2AS
 PRS5_END:
 
 PRS6:
+	.db NOTE_32, TONE_2E
+	.db NOTE_32, TONE_2G
+	.db NOTE_WL, TONE_3C
+PRS6_END:
+
+PRS7:
 	.db NOTE_8, TONE_3E
 	.db NOTE_8, TONE_2B
 	.db NOTE_8, TONE_3FS
@@ -639,28 +668,28 @@ PRS6:
 	.db NOTE_8, TONE_3CS
 	.db NOTE_4, TONE_2B
 	.db NOTE_8, TONE_2B
-PRS6_END:
-
-PRS7:
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1E
-	.db NOTE_32, TONE_NONE
-	.db NOTE_32, TONE_1F
-	.db NOTE_32, TONE_NONE
 PRS7_END:
 
 PRS8:
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1E
+	.db NOTE_32, TONE_NONE
+	.db NOTE_32, TONE_1F
+	.db NOTE_32, TONE_NONE
+PRS8_END:
+
+PRS9:
 	.db NOTE_32, TONE_2E
 	.db NOTE_32, TONE_NONE
 	.db NOTE_32, TONE_2F
@@ -679,7 +708,7 @@ PRS8:
 	.db NOTE_32, TONE_NONE
 
 	.db NOTE_4, TONE_NONE
-PRS8_END:
+PRS9_END:
 
 ;=============================================================
 ;=============================================================
