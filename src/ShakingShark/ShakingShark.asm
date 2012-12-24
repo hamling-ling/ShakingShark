@@ -133,7 +133,7 @@
 .endmacro
 
 ; flip port output
-.macro FlipOut			; FLIP_PORT portx, port_bit
+.macro FlipOut			; FlipOut portx, port_bit
 	in		acc, @0
 	ldi		acc2, @1	; bit mask
 	eor		acc, acc2
@@ -390,8 +390,6 @@ snd_pwm_out:
 	inc		scnt
 	cp		scnt, sctop
 	brlo	snd_pwm_ext
-	;cp		scnt, sctop
-	;breq	snd_pwm_clr
 	FlipOut	PRT_SND, 1<<PIN_SND
 snd_pwm_clr:
 	clr		scnt
