@@ -454,11 +454,11 @@ readv_level0:
 	rjmp readv_ext
 readv_level1:
 	ldi		acc, INPUT_LV1
-	ldi		acc2, 0b1000_0001
+	ldi		acc2, 0b0000_0001
 	rjmp readv_ext
 readv_level2:
 	ldi		acc, INPUT_LV1
-	ldi		acc2, 0b1000_0011
+	ldi		acc2, 0b0000_0011
 	rjmp readv_ext
 readv_level3:
 	ldi		acc, INPUT_LV2
