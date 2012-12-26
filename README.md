@@ -1,13 +1,12 @@
 Shaking Shark
 =========
 
-#Introduction
+#Overview
 
 This project aims to make a electric toy device that selectably plays jaws theme sound phrase.
-Whitch phrase to play depends on how fast he device is shaken. It gives sound effect for kids 
+Whitch phrase to play depends on how fast the device is shaken. It gives sound effect for kids 
 play of acting shark. Not like ordinaly melody player, physical accerelative movement of the 
-device turns out the sound effect. The mood of killer shark attack now turned out to a melody
-and it enhances fun of shark play.
+device turns out the sound effect and it enhances fun of killer shark attack play for kids.
 
 This project includes followings
 - Electric circuit diagram(T.B.D)
@@ -15,11 +14,22 @@ This project includes followings
 
 #Hardware Requirement
 Following components are required to use this program.
+See schematic diagram for detail.
+
+Electrical Circuit
 * Atmega168 or ATTiny45
 * Accerelometer ADXL202
 * Buzzer or Speaker
+* Buttery
 
-#Transition Matricx
+#How to use
+
+1. Download AtmelStudio
+2. open the atsln file and buid it
+3. Use your avr writer to write the generated hex file
+4. place the programmed AVR to your circuit
+
+#How it work?
 
 This matrics describes what phrase to play depending on input level.
 What makes input level different is an accerelometer read. Continue shaking the device
