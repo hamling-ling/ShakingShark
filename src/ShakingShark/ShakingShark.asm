@@ -20,6 +20,8 @@
 .include "m168def.inc"	;
 .equ PRT_LV		= portb	; port for level indicator
 .equ DDR_LV		= ddrb	; ddr  for PRT_LV
+.equ PRT_NT		= portd	; port for note indicator
+.equ DDR_NT		= ddrd	; ddr  for PRT_NT
 .equ PRT_SND	= portc	; port for sound pwm
 .equ DDR_SND	= ddrc	; ddr for PRT_SND
 .equ PIN_SND	= 5		; pin for above
@@ -215,6 +217,10 @@ main:
 	out	 	DDR_LV, acc		; set direction
 	ldi	 	acc, 0x00		; set output data
 	out	 	PRT_LV, acc		; set all to low
+	ldi	 	acc, 0xFF		; P_NT all bits are output
+	out	 	DDR_NT, acc		; set direction
+	ldi	 	acc, 0x00		; set output data
+	out	 	PRT_NT, acc		; set all to low
 #endif
 #ifdef ATTINY45
 	sbi		DDR_LV, PIN_LV
@@ -274,7 +280,9 @@ main:
 	sei						; allow all interruption
 
 main_loop:
-
+#ifdef ATMEGA168
+	out		PRT_NT, sctop
+#endif
 	rjmp	main_loop		; loop
 
 ;=============================================================
@@ -367,9 +375,6 @@ set_freq_asgn:
 	mov		mcnt, one
 set_freq_ext:
 
-	;debug
-	;out		PRT_LV, sctop
-
 	ret
 
 ;=============================================================
@@ -445,7 +450,9 @@ readv_compare:
 	cpi		vval, 30-SENSITIVITY
 	brlo	readv_level4
 	cpi		vval, 31-SENSITIVITY
-	rjmp	readv_level5
+	brlo	readv_level5
+	rjmp	readv_level6
+
 readv_level0:
 	ldi		acc, INPUT_LV0
 	ldi		acc2, 0b0000_0000
@@ -469,6 +476,10 @@ readv_level4:
 readv_level5:
 	ldi		acc, INPUT_LV2
 	ldi		acc2, 0b0001_1111
+	rjmp readv_ext
+readv_level6:
+	ldi		acc, INPUT_LV2
+	ldi		acc2, 0b0011_1111
 	rjmp readv_ext
 readv_ext:
 	rcall	sel_nxt_snd
