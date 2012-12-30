@@ -82,6 +82,7 @@
 .equ SNDDATA_ID_LV8 = 8
 .equ SNDDATA_ID_LV9 = 9
 .equ SNDDATA_ID_MAX = SNDDATA_ID_LV9
+.equ	SIZE = 4
 
 ;=============================================================
 ; variables
@@ -111,7 +112,10 @@
 ;=============================================================
 ; macro
 ;=============================================================
+
+;=============================================================
 ; preserve registers
+;=============================================================
 .macro StoreRegs
 	in		sreg_save, SREG	; preserve status
 	push	sreg_save
@@ -126,7 +130,9 @@
 	out		SREG, sreg_save	; restore sreg
 .endmacro
 
+;=============================================================
 ; ten count
+;=============================================================
 .macro TimeCount10		; TIME_COUNT @0 @1
 	inc		@0			; increment register given by @0
 	cp		@0, ten		; compare the register
@@ -134,7 +140,9 @@
 	clr		@0			; clear the register
 .endmacro
 
+;=============================================================
 ; flip port output
+;=============================================================
 .macro FlipOut			; FlipOut portx, port_bit
 	in		acc, @0
 	ldi		acc2, @1	; bit mask
@@ -142,7 +150,9 @@
 	out		@0, acc		; output
 .endmacro
 
-; usage: InReg reg, addr 
+;=============================================================
+; usage: InReg reg, addr
+;=============================================================
 .macro InReg 
 	.if @1 < 0x40 
 		in @0, @1 
@@ -153,7 +163,9 @@
 	.endif 
 .endmacro 
 
-; usage: OutReg addr, reg 
+;=============================================================
+; usage: OutReg addr, reg
+;=============================================================
 .macro OutReg 
 	.if @0 < 0x40 
 		out @0, @1 
@@ -164,15 +176,30 @@
 	.endif 
 .endmacro 
 
-; usage: SetData addr_start, addr_end 
+;=============================================================
+; usage: SetData addr_start, addr_end
+;=============================================================
 .macro SetData 
 	ldi		zl, low(@0<<1)
 	ldi		zh, high(@0<<1)
 	ldi		cur_data_edl, low(@1<<1)
 	ldi		cur_data_edh, high(@1<<1)
-	;lpm		mtop, z+		; initialize tcnt compare value
-	;lpm		sctop, z+		; count untill scnt becomes this value
 .endmacro 
+
+;=============================================================
+; 16bit divide by 2
+; @0 : high address
+; @1 : low address
+;=============================================================
+.macro Div16By2		; Div16By2 @0 @1
+			mov		acc, @0
+			lsr		@0
+			andi	acc, 1
+			lsr		@1
+			sbrc	acc, 0
+			ori		@1, 0b1000_0000
+			nop
+.endmacro
 
 ;=============================================================
 ; program
@@ -256,6 +283,16 @@ main:
 
 	ldi		cur_data_id, SNDDATA_ID_LV0
 	ldi		nxt_data_id, SNDDATA_ID_LV0
+
+	; set y register sram start address
+	ldi		yl, low(SRAM_START)
+	ldi		yh, high(SRAM_START)
+
+	clr		acc
+	rcall	store_acc	; reset buffer
+	rcall	store_acc
+	rcall	store_acc
+	rcall	store_acc
 
 	; Timer/Counter 0 initialize
 	; tccr0a=0, standard mode
@@ -435,8 +472,10 @@ readv_x:
 	ret
 readv_y:
 	add		vread, acc
-	add		vval, vread
-	lsr		vval
+	mov		acc, vread
+	rcall	store_acc
+	rcall	average
+	mov		vval, acc
 
 readv_compare:
 	cpi		vval, 26-SENSITIVITY
@@ -589,6 +628,56 @@ load_snd_for_id_ext:
 	;out		PRT_LV, cur_data_id
 
 	ret
+
+;=============================================================
+; store_acc
+; store acc valu into ring buffer
+;=============================================================
+store_acc:	st		y+, acc
+			cpi		yl, low(SRAM_START)+SIZE
+			breq	store_acc_resetpos
+			rjmp	store_acc_ext
+store_acc_resetpos:
+			ldi		yl, low(SRAM_START)
+			ldi		yh, high(SRAM_START)
+store_acc_ext:
+			ret
+
+;=============================================================
+; average
+; take summation of ring buffer and divide by 4
+;=============================================================
+.def suml = r24
+.def sumh = r25
+average:
+			push	yl
+			push	yh
+			push	suml
+			push	sumh
+
+			ldi yl, low(SRAM_START)
+			ldi yh, high(SRAM_START)
+			clr		suml
+			clr		sumh
+
+average_loop:
+			ld		acc, y+
+			add		suml, acc
+			ldi		acc, 0
+			adc		sumh, acc		; addition with carry
+			cpi		yl, low(SRAM_START)+SIZE
+			breq	avrage_div
+			rjmp	average_loop
+avrage_div:
+			Div16By2	sumh, suml
+			Div16By2	sumh, suml
+			mov		acc, suml
+
+			pop		sumh
+			pop		suml
+			pop		yh
+			pop		yl
+			ret
 
 ;=============================================================
 ; data
