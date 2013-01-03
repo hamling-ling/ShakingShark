@@ -5,7 +5,7 @@
 ; clock			: clk=8MHz
 ;=============================================================
 ; debug directive
-#define	DEBUG
+;#define	DEBUG
 
 ; chip select
 #define			ATMEGA168	; Atmega168
@@ -478,17 +478,17 @@ readv_y:
 	mov		vval, acc
 
 readv_compare:
-	cpi		vval, 26-SENSITIVITY
+	cpi		vval, 24-SENSITIVITY
 	brlo	readv_level0
-	cpi		vval, 27-SENSITIVITY
+	cpi		vval, 25-SENSITIVITY
 	brlo	readv_level1
-	cpi		vval, 28-SENSITIVITY
+	cpi		vval, 26-SENSITIVITY
 	brlo	readv_level2
-	cpi		vval, 29-SENSITIVITY
+	cpi		vval, 27-SENSITIVITY
 	brlo	readv_level3
-	cpi		vval, 30-SENSITIVITY
+	cpi		vval, 28-SENSITIVITY
 	brlo	readv_level4
-	cpi		vval, 31-SENSITIVITY
+	cpi		vval, 29-SENSITIVITY
 	brlo	readv_level5
 	rjmp	readv_level6
 
@@ -505,7 +505,7 @@ readv_level2:
 	ldi		acc2, 0b0000_0011
 	rjmp readv_ext
 readv_level3:
-	ldi		acc, INPUT_LV2
+	ldi		acc, INPUT_LV1
 	ldi		acc2, 0b0000_0111
 	rjmp readv_ext
 readv_level4:
@@ -551,6 +551,9 @@ sel_nxt_snd_lv1:
 	ldi		acc, SNDDATA_ID_LV4
 	rjmp	sel_nxt_snd_ext
 sel_nxt_snd_lv2:
+	ldi		acc, SNDDATA_ID_LV4
+	cpi		cur_data_id, SNDDATA_ID_LV4
+	brlo	sel_nxt_snd_ext
 	mov		acc, cur_data_id
 	inc		acc
 	cpi		acc, SNDDATA_ID_MAX+1
